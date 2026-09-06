@@ -12,7 +12,6 @@ const PORT = process.env.PORT || 3001;
 let sock = null;
 let pairingCode = null;
 
-// 🔥 PEGA O NÚMERO DAS VARIÁVEIS DE AMBIENTE
 const PHONE_NUMBER = process.env.WHATSAPP_PHONE_NUMBER || '';
 
 console.log(`📱 Número configurado: ${PHONE_NUMBER || 'NÃO CONFIGURADO'}`);
@@ -32,14 +31,12 @@ async function connectToWhatsApp() {
     sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update;
 
-      // Se tiver QR Code e não estiver registrado, gera código de pareamento
       if (qr && !sock.authState.creds.registered) {
         console.log('🔑 Gerando código de pareamento...');
         
         try {
           if (!PHONE_NUMBER) {
             console.error('❌ ERRO: Variável WHATSAPP_PHONE_NUMBER não configurada!');
-            console.log('💡 Configure no Render: WHATSAPP_PHONE_NUMBER = 5544998691568');
             return;
           }
 
@@ -49,7 +46,6 @@ async function connectToWhatsApp() {
           console.log(`\n✅ SEU CÓDIGO DE PAREAMENTO: ${code}\n`);
           console.log(`📲 Abra o WhatsApp > Dispositivos vinculados > Vincular com número de telefone`);
           console.log(`🔢 Digite: ${code}\n`);
-          console.log(`🌐 Ou acesse: https://teste-fomx.onrender.com/pairing-code`);
           
           pairingCode = code;
         } catch (error) {
@@ -74,10 +70,9 @@ async function connectToWhatsApp() {
       }
     });
 
-    // Salva credenciais
     sock.ev.on('creds.update', saveCreds);
 
-    // Recebe mensagens e envia para o Rails
+    // 🔥 RECEBE MENSAGENS E RESPONDE
     sock.ev.on('messages.upsert', async (m) => {
       const msg = m.messages[0];
       if (!msg.message) return;
@@ -91,17 +86,45 @@ async function connectToWhatsApp() {
 
       if (msg.key.fromMe) return;
 
+      console.log(`📩 Mensagem de ${from}: ${text}`);
+
       try {
+        // 🔥 RESPOSTAS AUTOMÁTICAS
+        let resposta = '';
+
+        if (text.toLowerCase().includes('oi') || text.toLowerCase().includes('olá')) {
+          resposta = '👋 Olá! Como posso ajudar você?';
+        } else if (text.toLowerCase().includes('tudo bem') || text.toLowerCase().includes('como vai')) {
+          resposta = '🤖 Tudo bem sim! E você?';
+        } else if (text.toLowerCase().includes('menu') || text.toLowerCase().includes('ajuda')) {
+          resposta = '📋 *MENU DE OPÇÕES*\n\n1️⃣ - Falar com atendente\n2️⃣ - Ver horários\n3️⃣ - Sair';
+        } else if (text.toLowerCase().includes('1') || text.toLowerCase().includes('atendente')) {
+          resposta = '👤 Um atendente irá falar com você em breve!';
+        } else if (text.toLowerCase().includes('2') || text.toLowerCase().includes('horário')) {
+          resposta = '🕐 Nosso horário de funcionamento é de 08h às 18h.';
+        } else if (text.toLowerCase().includes('3') || text.toLowerCase().includes('sair')) {
+          resposta = '👋 Até logo! Digite "menu" sempre que precisar.';
+        } else if (text.toLowerCase().includes('obrigado') || text.toLowerCase().includes('valeu')) {
+          resposta = '😊 Por nada! Estou aqui para ajudar.';
+        } else {
+          resposta = '❓ Desculpe, não entendi. Digite "menu" para ver as opções disponíveis.';
+        }
+
+        // ENVIA A RESPOSTA
+        await sock.sendMessage(from, { text: resposta });
+
+        // ENVIA PARA O RAILS (se configurado)
         const webhookUrl = process.env.RAILS_WEBHOOK_URL;
         if (webhookUrl) {
           await axios.post(webhookUrl, {
             from: from,
             text: text,
+            resposta: resposta,
             messageId: msg.key.id,
           });
         }
       } catch (error) {
-        console.error('❌ Erro ao enviar webhook:', error.message);
+        console.error('❌ Erro ao processar mensagem:', error.message);
       }
     });
   } catch (error) {
@@ -110,7 +133,7 @@ async function connectToWhatsApp() {
   }
 }
 
-// 📤 Rota para enviar mensagens
+// 📤 Rota para enviar mensagens via API
 app.post('/send-message', async (req, res) => {
   const { to, text, buttons } = req.body;
 
@@ -142,16 +165,16 @@ app.post('/send-message', async (req, res) => {
   }
 });
 
-// Rota para pegar o código de pareamento via API
+// Rota para pegar o código de pareamento
 app.get('/pairing-code', (req, res) => {
   if (pairingCode) {
     res.json({ 
       code: pairingCode,
-      message: `Digite ${pairingCode} no WhatsApp > Dispositivos vinculados > Vincular com número de telefone`
+      message: `Digite ${pairingCode} no WhatsApp > Dispositivos vinculados`
     });
   } else {
     res.status(404).json({ 
-      error: 'Código ainda não gerado. Aguarde alguns segundos e tente novamente.' 
+      error: 'Código ainda não gerado' 
     });
   }
 });
@@ -162,12 +185,10 @@ app.get('/health', (req, res) => res.send('OK'));
 // Inicia servidor
 app.listen(PORT, () => {
   console.log(`🟢 Serviço Baileys rodando na porta ${PORT}`);
-  console.log(`🔗 URL: https://teste-fomx.onrender.com`);
   console.log('⏳ Conectando ao WhatsApp...');
   connectToWhatsApp();
 });
 
-// Trata fechamento
 process.on('SIGINT', () => {
   console.log('🔴 Desconectando...');
   if (sock) sock.end();
